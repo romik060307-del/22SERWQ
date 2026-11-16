@@ -1,0 +1,75 @@
+name: Build AI Floating Assistant APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      AI_GATEWAY_URL: ${{ vars.AI_GATEWAY_URL }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Test AI gateway source
+        working-directory: server
+        run: npm test
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Resolve AI gateway URL automatically
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$AI_GATEWAY_URL" ]; then
+            echo "Memakai AI_GATEWAY_URL repository variable."
+            echo "AI_GATEWAY_URL=$AI_GATEWAY_URL" >> "$GITHUB_ENV"
+          elif [ -n "$CF_TOKEN" ] && [ -n "$CF_ACCOUNT" ]; then
+            RESPONSE=$(curl -sS \
+              -H "Authorization: Bearer $CF_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/subdomain" || true)
+            SUBDOMAIN=$(printf '%s' "$RESPONSE" | jq -r '.result.subdomain // empty' 2>/dev/null || true)
+            if [ -n "$SUBDOMAIN" ]; then
+              GATEWAY_URL="https://ai-floating-assistant-gateway.${SUBDOMAIN}.workers.dev"
+              echo "AI_GATEWAY_URL=$GATEWAY_URL" >> "$GITHUB_ENV"
+              echo "URL gateway ditemukan otomatis dari Cloudflare."
+            else
+              echo "::warning::Subdomain workers.dev belum tersedia. APK dibangun, tetapi AI belum terhubung. Aktifkan workers.dev pada akun Cloudflare atau isi AI_GATEWAY_URL."
+            fi
+          else
+            echo "::warning::Gateway belum disetel. APK tetap dibangun, tetapi AI belum dapat terhubung."
+          fi
+
+      - name: Build debug APK
+        run: gradle assembleDebug --stacktrace
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Floating-Assistant-APK-v0.2.0
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
