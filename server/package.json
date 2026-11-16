@@ -1,0 +1,8 @@
+{
+  "name": "ai-floating-assistant-gateway",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test worker.test.mjs"
+  }
+}
